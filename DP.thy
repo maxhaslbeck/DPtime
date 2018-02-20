@@ -380,7 +380,6 @@ fun fib_impl :: "nat \<Rightarrow> nat Heap" where
 declare fib_impl.simps [sep_proc]
 
 
-thm 
 lemma empty_consistent: "consistent_list (replicate (n+1) None) = True" by auto2
 
 
