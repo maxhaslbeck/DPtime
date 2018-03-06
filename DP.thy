@@ -54,7 +54,6 @@ fun fib_fun :: "nat \<Rightarrow> (nat option) list \<Rightarrow> (nat option) l
                              xs''' =  xs''[(Suc (Suc n)):= (Some v)] in (xs''',v)
             | Some v \<Rightarrow> (xs, v)))"
 declare fib_fun.simps(1,2) [rewrite]
-declare fib_fun.simps(3) [unfold]
 setup {* add_fun_induct_rule (@{term fib_fun}, @{thm fib_fun.induct}) *}
 setup {* register_wellform_data ("fib_fun i xs", ["i < length xs"]) *}
 
@@ -174,7 +173,8 @@ fun fibH :: "nat \<Rightarrow> nat option array \<Rightarrow> nat Heap" where
            return v
           }
              | Some v \<Rightarrow> return v}"
-declare fibH.simps [sep_proc]
+
+
 setup {* add_fun_induct_rule (@{term fibH}, @{thm fibH.induct}) *}
 
 
@@ -377,8 +377,6 @@ fun fib_impl :: "nat \<Rightarrow> nat Heap" where
         M <- Array.new (n+1) None;
         fibH n M
       }"
-declare fib_impl.simps [sep_proc]
-
 
 lemma empty_consistent: "consistent_list (replicate (n+1) None) = True" by auto2
 
@@ -394,14 +392,6 @@ lemma fib_impl_rule[hoare_triple]: "<$(fib_time n)> fib_impl n <\<lambda>r. \<up
 @qed
 
 lemma fib_bound[asym_bound]: "(\<lambda>n. fib_time n) \<in> \<Theta>(%n. n)" unfolding fib_time_def by auto2
-
-
-
-
-
-
-
-
 
  
 end
