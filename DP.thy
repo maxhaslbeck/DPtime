@@ -57,7 +57,6 @@ declare fib_fun.simps(1,2) [rewrite]
 setup {* add_fun_induct_rule (@{term fib_fun}, @{thm fib_fun.induct}) *}
 setup {* register_wellform_data ("fib_fun i xs", ["i < length xs"]) *}
 
-
 lemma fib_fun_stays[rewrite]: "n < length xs \<Longrightarrow> xs ! n \<noteq> None \<Longrightarrow> (fst (fib_fun n xs)) = xs"
   apply(induct rule: fib_fun.induct) apply auto done
 
@@ -174,199 +173,169 @@ fun fibH :: "nat \<Rightarrow> nat option array \<Rightarrow> nat Heap" where
           }
              | Some v \<Rightarrow> return v}"
 
-
 setup {* add_fun_induct_rule (@{term fibH}, @{thm fibH.induct}) *}
 
 
-subsubsection "(recombination) costs for DP computation of fib" 
-(*
-fun comcost :: "nat \<Rightarrow> nat" where 
-  "comcost 0 = 2"
-| "comcost (Suc 0) = 2"
-| "comcost (Suc (Suc n)) = 6" *)
-fun comcost :: "nat \<Rightarrow> nat" where 
-  "comcost n = 6"
-declare comcost.simps [rewrite]
+subsection "definition of time function"
 
-lemma comcost_ub: "comcost n \<le> 6" apply(induct n rule: comcost.induct) by auto
-
+fun f_time :: "nat \<Rightarrow> (nat option) list \<Rightarrow> nat" where
+  "f_time 0 xs = (let
+      x = xs ! 0 in
+      (case x of None \<Rightarrow> 4
+            | Some v \<Rightarrow> 2))"
+| 
+  "f_time (Suc 0) xs = (let
+      x = xs ! 1 in
+      (case x of None \<Rightarrow> 4
+            | Some v \<Rightarrow> 2))"
+| "f_time (Suc (Suc n)) xs = (let
+      x = xs ! (Suc (Suc n)) in
+      (case x of None \<Rightarrow> let (xs',a) = fib_fun (Suc n) xs;
+                            (xs'',b) = fib_fun n xs'  in 
+                            4 + f_time (Suc n) xs + f_time n (xs')
+            | Some v \<Rightarrow> 2))"
+declare f_time.simps [rewrite]
+thm f_time.induct
 
 subsubsection "the potential for the memoization Table"
+        
+definition "C = 8"
+definition phi :: "(nat option) list \<Rightarrow> nat set \<Rightarrow> nat" where
+  "phi xs S =  sum (\<lambda>i. case xs!i of None \<Rightarrow> C | Some _ \<Rightarrow> 0) S"
 
-definition memtableP :: " nat option list \<Rightarrow> nat \<Rightarrow> nat \<Rightarrow> nat" where
-  "memtableP xs A B = sum (\<lambda>i. case xs!i of None \<Rightarrow> comcost i | Some _ \<Rightarrow> 0) {A..<B}"
- 
-lemma empty_ub[rewrite]: "memtableP (replicate x None) 0 x = x * 6"
-  unfolding memtableP_def by auto  
-(*
-lemma extract_from_sum: fixes i :: nat shows
-  "A \<le> i \<Longrightarrow> i < B \<Longrightarrow> sum g {A..B} = sum g ({A..B}-{i}) + g i"
+lemma assumes "(\<forall>i\<in>S. i<length xs) " "x\<in>S" "xs!x = None" "finite S"
+  shows phi_update_extract: "phi (xs[x:=Some v]) S + C = phi xs S"
 proof -
-  assume inbounds: "A \<le> i" "i < B"  
-  then have u: "(({A..B}-{i}) \<union> {i}) = {A..B}" by auto
-  have "sum g (({A..B}-{i}) \<union> {i}) = sum g ({A..B}-{i}) + sum g {i}" 
-    apply(rule sum.union_disjoint) by auto
-  then show ?thesis unfolding u by auto
-qed *)
- 
+  from assms(2,4) have p: "C = sum (\<lambda>i. if i=x then C else 0) S"
+    by simp
+  let ?g ="\<lambda>i. case xs[x := Some v] ! i of None \<Rightarrow> C | Some x \<Rightarrow> 0"
+  have "(\<Sum>i\<in>S. case xs[x := Some v] ! i of None \<Rightarrow> C | Some x \<Rightarrow> 0) + C 
+      = sum ?g S + sum (\<lambda>i. if i=x then C else 0) S"
+    apply(subst (2) p) by simp
+  also have "\<dots> = sum (\<lambda>i. ?g i + (\<lambda>i. if i=x then C else 0) i) S" by(rule sum.distrib[symmetric])
+  also have "\<dots> = (\<Sum>i\<in>S. case xs ! i of None \<Rightarrow> C | Some x \<Rightarrow> 0)" 
+    apply(rule sum.cong)
+     apply simp
+    subgoal for x' apply(cases "x=x'") using assms(1,2,3) by auto done
+  finally show ?thesis unfolding phi_def .
+qed 
 
-lemma assumes "A\<le>C" "C \<le> B" "B \<le> length xs"
-  shows memtableP_split[backward]: "memtableP xs A B = memtableP xs A C + memtableP xs C B"
-proof -
-  let ?g = "(\<lambda>i. case xs!i of None \<Rightarrow> comcost i | Some _ \<Rightarrow> 0)"
-  from assms(1,2) have k: "({A..<B}-{A..<C}) \<union> {A..<C} = {A..<B}" by auto
-  from assms(1,2) have l: "{A..<B}-{A..<C} = {C..<B}" by auto
-  have "memtableP xs A B = sum ?g {A..<B}" unfolding memtableP_def by simp
-  also have "\<dots> = sum ?g (({A..<B}-{A..<C}) \<union> {A..<C})" using k by auto
-  also have "\<dots> = sum ?g ({A..<B}-{A..<C}) + sum ?g {A..<C}"  apply(rule sum.union_disjoint) by auto
-  also have "\<dots> = sum ?g {A..<C} + sum ?g {C..<B}" using l by auto
-  finally show ?thesis unfolding memtableP_def .
+lemma fib_fun_untouched_safe: "x'< y \<Longrightarrow>  y<length xs \<Longrightarrow>fst (fib_fun x' xs) ! y = xs ! y"
+proof(induct x' xs rule: fib_fun.induct)
+case (1 xs)
+  then show ?case
+    apply(cases "xs!0 = None") by auto 
+next
+  case (2 xs)
+  then show ?case 
+    apply(cases "xs!1 = None") by auto 
+next
+  case (3 n xs)
+  then show ?case
+    apply(cases "xs!(Suc (Suc n)) = None")
+     apply (auto simp: fib_fun_length split: prod.split) 
+    by (metis Suc_lessD fib_fun_length fst_conv less_irrefl less_le_trans less_trans_Suc nth_list_update_neq)
+
+qed
+    
+
+subsubsection "proving the potential"
+
+lemma fib_time_amor: "S={0..M} \<Longrightarrow> i\<le>M \<Longrightarrow> M < length xs  \<Longrightarrow> f_time i xs + phi (fst (fib_fun i xs)) S \<le> 4 + phi xs S"
+proof(induct i xs rule: f_time.induct)
+  case (1 xs)
+  then show ?case apply(cases "xs!0") apply (auto simp: phi_def) 
+    apply(rule sum_mono) subgoal for i apply(cases "i=0") apply auto apply(subst nth_list_update_eq) apply auto done done
+next
+  case (2 xs)
+  then show ?case apply(cases "xs!1") apply (auto simp: phi_def) 
+    apply(rule sum_mono) subgoal for i apply(cases "i=1") apply auto   done done
+next
+  case (3 n xs)
+  show ?case
+  proof (cases "xs ! Suc (Suc n) = None")
+    case True
+    then have r: "f_time (Suc (Suc n)) xs
+        = 4 + f_time (Suc n) xs + f_time n (fst (fib_fun (Suc n) xs))"
+      apply auto using split_beta by blast  
+    let ?xs' = "(fst (fib_fun (Suc n) xs))"
+    let ?v' = "(snd (fib_fun (Suc n) xs))"
+    let ?xs'' = "(fst (fib_fun n ?xs'))"
+    let ?v'' = "(snd (fib_fun n ?xs'))"
+    from 3(1)[OF _ True] 3(3-5) have 2: "f_time (Suc n) xs + phi ?xs' S \<le> 4 + phi xs S"        
+      by (metis Suc_leD old.prod.exhaust) 
+    have t: "length ?xs' = length xs" using fib_fun_length 3 by auto
+    have *: "f_time n ?xs' + phi ?xs'' S \<le> 4 + phi ?xs' S" 
+      apply(rule 3(2))
+      using True 3(3-5) apply(auto simp add: t split: prod.split)  
+      apply(rule prod.collapse) apply(rule prod.collapse) done
+    let ?xs''' = "?xs''[Suc (Suc n) := Some (?v'+?v'')]"
+    have tp: "(fst (fib_fun (Suc (Suc n)) xs)) = ?xs'''" using True by (auto simp: Let_def split: prod.split) 
+
+    have k: "phi ?xs''' S + C
+        = phi ?xs'' S" 
+      apply(rule phi_update_extract)
+      using 3(3-5) apply (auto simp: fib_fun_length fib_fun_untouched_safe) 
+      using True by auto 
+
+    have "f_time (Suc (Suc n)) xs + phi (fst (fib_fun (Suc (Suc n)) xs)) S + C
+        = 4 + f_time (Suc n) xs + f_time n ?xs' + (phi ?xs''' S + C)"
+      by (simp only: r tp) 
+    also have "\<dots> = 4 + f_time (Suc n) xs + f_time n ?xs' + phi ?xs'' S" by (simp only: k)
+    also have "\<dots> \<le> f_time (Suc n) xs + phi ?xs' S + 8"
+      using * by auto 
+    also have "\<dots> \<le> 4 + phi xs S + C" using 2 by (auto simp: C_def)
+    finally show ?thesis by auto
+  next
+    case False
+    then show ?thesis by auto
+  qed
 qed
 
-lemma memtableP_pays: "i<length xs \<Longrightarrow> xs ! i = None \<Longrightarrow> memtableP xs i (Suc i) = comcost i"
-  unfolding memtableP_def by auto
-
-lemma memtableP_doesnt_pay: "i<length xs \<Longrightarrow> consistent_list xs \<Longrightarrow> memtableP (fst (fib_fun i xs)) i (Suc i) = 0"
-  unfolding memtableP_def apply auto using fib_fun_effect by auto 
-
-(* Key result for memtableP: if xs ! i = None, then updating xs ! i to Some v allows
-   extracting comcost i credit from the potential. *)
-lemma memtableP_correct [rewrite_back]:
-  assumes "A \<le> i" "i < B" "B \<le> length xs" "xs ! i = None"
-  shows "memtableP xs A B = memtableP xs A i + comcost i + memtableP xs (Suc i) B"
+corollary fib_time[backward]: assumes "S={0..<M+1}" "i\<le>M" "M < length xs"
+  shows "f_time i xs \<le> 4 + phi xs S" 
 proof - 
-  have "memtableP xs A B = memtableP xs A (Suc i) + memtableP xs (Suc i) B"
-    apply(rule memtableP_split) using assms by auto
-  also have "memtableP xs A (Suc i) = memtableP xs A i + memtableP xs i (Suc i)"
-    apply(rule memtableP_split) using assms by auto
-  also have "memtableP xs i (Suc i) = comcost i"
-    apply(rule memtableP_pays) using assms by auto
-  finally show ?thesis .
-qed 
-
-
-lemma recombine[rewrite_back]: assumes "A \<le> i " "  i < B " " B \<le> length xs " " xs ! i = None"
-    "consistent_list xs"
-  shows "memtableP (fst (fib_fun i xs)) A B = memtableP (fst (fib_fun i xs)) A i + memtableP xs (Suc i) B"
-proof -
-  have "memtableP (fst (fib_fun i xs)) A B = memtableP (fst (fib_fun i xs)) A (Suc i) + memtableP (fst (fib_fun i xs)) (Suc i) B" 
-    apply(rule memtableP_split) using assms by (auto simp: fib_fun_length)
-  also have "memtableP (fst (fib_fun i xs)) (Suc i) B = memtableP xs (Suc i) B"
-    using assms(3) by(auto  simp: fib_fun_untouched memtableP_def)
-  also have "memtableP (fst (fib_fun i xs)) A (Suc i) = memtableP (fst (fib_fun i xs)) A i + memtableP (fst (fib_fun i xs)) i (Suc i)"
-    apply(rule memtableP_split) using assms by (auto simp: fib_fun_length)
-  also have "memtableP (fst (fib_fun i xs)) i (Suc i) = 0" using memtableP_doesnt_pay assms by auto
-  finally show ?thesis by simp
-qed 
-
-lemma outofreach[rewrite]: "memtableP (xs[i:=v]) 0 i = memtableP xs 0 i"
-  unfolding memtableP_def by auto
-
-thm recombine[where i="n"
-        and xs="(fst (fib_fun (Suc n) xs))" and A=0 and B ="Suc (Suc n)"]
-
-lemma outofreachlower[rewrite]: "n+2 \<le> length xs \<Longrightarrow> memtableP (fst (fib_fun n xs)) (n+1) (n+2) = memtableP xs (n+1) (n+2)"
-  unfolding memtableP_def apply(rule sum.cong)
-  by (auto simp: fib_fun_untouched)
-
-subsubsection "the consistency of an memoization Array"
-
-definition consistent :: "nat option array \<Rightarrow> nat option list \<Rightarrow> nat \<Rightarrow> nat \<Rightarrow> assn" where [rewrite_ent]:
-  "consistent M xs A B = M \<mapsto>\<^sub>a xs * $(memtableP xs A B) * \<up>(consistent_list xs)"
-
-lemma i[rewrite]: "memtableP xs i i = 0" unfolding memtableP_def by auto
-(*lemma ii[rewrite]: "i < length xs \<Longrightarrow> memtableP (fst (fib_fun i xs )) 0 i = memtableP xs 0 i" unfolding memtableP_def sorry *)
-
-(* declare [[print_trace]] *)
-
+  have S: "S={0..M}" using assms by auto
+  have "f_time i xs + phi (fst (fib_fun i xs)) {0..M} \<le> 4 + phi xs {0..M}"    
+    apply(rule fib_time_amor) using assms by auto
+  then have "f_time i xs  \<le> 4 + phi xs {0..M}" by auto   
+  thus ?thesis using S by auto
+qed
 
 subsubsection "proving the correctness and time consumption of the imperative Program"
 
 lemma fibH_rule[hoare_triple]:
   "i < length xs \<Longrightarrow> consistent_list xs \<Longrightarrow>
-   <M \<mapsto>\<^sub>a xs * $(memtableP xs 0 (Suc i) + 2)>
+   <M \<mapsto>\<^sub>a xs * $(f_time i xs)>
    fibH i M
-   <\<lambda>r. \<up>(r = fib i) * consistent M (fst (fib_fun i xs)) 0 (Suc i)>\<^sub>t"
-@proof @fun_induct "fibH i M" arbitrary xs @with
-  @subgoal "(i = Suc (Suc n), M = M)"
-    @let "x = xs ! (Suc (Suc n))"
-    @case "x = None" @with 
-      @have "Suc (Suc (Suc n)) \<le> length xs"
-      @have "Suc (Suc n) < Suc (Suc (Suc n))"
-      @have "(Suc (Suc n)) < length xs"
-      @have "xs ! (Suc (Suc n)) = None"
-      @have "memtableP xs 0 (Suc (Suc (Suc n))) \<ge>\<^sub>t memtableP xs 0 (Suc (Suc n)) + comcost (Suc (Suc n)) + memtableP xs (Suc (Suc (Suc n))) (Suc (Suc (Suc n)))"
-      @have "comcost (Suc (Suc n)) \<ge>\<^sub>t 6"
-      @have "0\<le>Suc n"
-      @have "Suc n\<le>Suc (Suc n)"
-      @have "Suc (Suc n)\<le> length (fst (fib_fun (n+1) xs))"
-      @have "memtableP (fst (fib_fun (n+1) xs)) 0 (n+2) = memtableP (fst (fib_fun (n+1) xs)) 0 (n+1) + memtableP (fst (fib_fun (n+1) xs)) (n+1) (n+2)"
-
-      @have "memtableP (fst (fib_fun (Suc n) xs)) 0 (Suc (Suc n)) \<ge>\<^sub>t memtableP (fst (fib_fun (Suc n) xs)) 0 (Suc n) + memtableP (fst (fib_fun (Suc n) xs)) (Suc n) (Suc (Suc n))"
- (*     @have "memtableP xs 0 (Suc (Suc n)) = memtableP (fst (fib_fun (Suc (Suc n)) xs)) 0 (Suc (Suc n))"
-      @have "memtableP (fst (fib_fun (Suc (Suc n)) xs)) 0 (Suc (Suc n)) + memtableP xs (Suc (Suc n)) (Suc (Suc n)) \<ge>\<^sub>t  memtableP (fst (fib_fun (Suc (Suc n)) xs)) 0 (Suc (Suc (Suc n)))" 
- *)   
-
-      @have "consistent_list (fst (fib_fun (n+2) xs))"  
-      @have "fst (fib_fun (Suc (Suc n)) xs) = fst (fib_fun n (fst (fib_fun (Suc n) xs)))[Suc (Suc n) := Some (fib (n+2))]"
-
-
-
-      @have "memtableP xs (Suc (Suc (Suc n))) (Suc (Suc (Suc n))) + memtableP (fst (fib_fun (Suc n) xs)) (Suc n) (Suc (Suc n)) +
-                  memtableP (fst (fib_fun n (fst (fib_fun (Suc n) xs)))) 0 (Suc n)
-            \<ge>\<^sub>t memtableP (fst (fib_fun (n+2) xs)) 0 (n+3)" @with 
-        @have "memtableP xs (Suc (Suc (Suc n))) (Suc (Suc (Suc n))) + memtableP (fst (fib_fun (Suc n) xs)) (Suc n) (Suc (Suc n)) +
-                    memtableP (fst (fib_fun n (fst (fib_fun (Suc n) xs)))) 0 (Suc n)
-              = memtableP (fst (fib_fun (n+2) xs)) 0 (n+3)" @with
-          @have "memtableP (fst (fib_fun (n+2) xs)) 0 (n+2) = memtableP (fst (fib_fun (Suc n) xs)) (Suc n) (Suc (Suc n)) +
-                  memtableP (fst (fib_fun n (fst (fib_fun (Suc n) xs)))) 0 (Suc n)" @with 
-            
-            @have "memtableP (fst (fib_fun (n+2) xs)) 0 (n+2) = memtableP (fst (fib_fun n (fst (fib_fun (n+1) xs)))) 0 (n+2)"
-              @with
-              @have "xs ! (Suc (Suc n)) = None"
-              @have "fst (fib_fun (n+2) xs) = (fst (fib_fun n (fst (fib_fun (n+1) xs))))[n+2:= Some (snd (fib_fun n (fst (fib_fun (n+1) xs))) + (snd (fib_fun (n+1) xs)))]" @with
-                @unfold "fib_fun (Suc (Suc n)) xs"
-              @end
-            @end
-    
-            @have "memtableP (fst (fib_fun n (fst (fib_fun (n+1) xs)))) (n+1) (n+2) = memtableP (fst (fib_fun (n+1) xs)) (n+1) (n+2)"
-            @have "memtableP (fst (fib_fun n (fst (fib_fun (n+1) xs)))) 0 (n+2) = 
-                    memtableP (fst (fib_fun n (fst (fib_fun (n+1) xs)))) 0 (n+1) + memtableP (fst (fib_fun n (fst (fib_fun (n+1) xs)))) (n+1) (n+2)"
-          @end
-
-          @have "memtableP (fst (fib_fun (n+2) xs)) 0 (n+3) = memtableP (fst (fib_fun (n+2) xs)) 0 (n+2) + memtableP xs (n+3) (n+3)"
-        @end 
-        @end (* hint \<ge>\<^sub>t *)
-
-        
-        
-      @end (* case *)
-      @have "xs ! (n+2) = Some (fib (n+2))"
-      @have "consistent_list (fst (fib_fun (Suc (Suc n)) xs))"
-      @have "(fst (fib_fun (n+2) xs)) = xs"
-  @endgoal                          
+   <\<lambda>r. \<up>(r = fib i) * M \<mapsto>\<^sub>a (fst (fib_fun i xs))  * \<up>(consistent_list (fst (fib_fun i xs))) >\<^sub>t"
+@proof @fun_induct "fibH i M" arbitrary xs @with                      
   @subgoal "(i = 0, M = M)"
   @let "x = xs ! 0"
   @case "x = None" @with  
-      @have "memtableP xs 0 (Suc 0) \<ge>\<^sub>t memtableP xs 0 0 + comcost 0 + memtableP xs 1 1"
-      @have "comcost 0 \<ge>\<^sub>t 2"
-      @have "memtableP xs 0 0 = memtableP (fst (fib_fun 0 xs)) 0 0"
-      @have "memtableP xs 0 0 + memtableP xs 1 1 \<ge>\<^sub>t  memtableP (fst (fib_fun 0 xs)) 0 1"
     @end
-  @endgoal
+  @endgoal 
   @subgoal "(i = Suc 0, M = M)"
     @let "x = xs ! 1"
     @case "x = None" @with
-      @have "memtableP xs 0 2 \<ge>\<^sub>t memtableP xs 0 1 + comcost 1 + memtableP xs 2 2"
-      @have "comcost 1 \<ge>\<^sub>t 2"
-      @have "memtableP xs 0 1 = memtableP (fst (fib_fun 1 xs)) 0 1"
-      @have "memtableP xs 0 1 + memtableP xs 2 2 \<ge>\<^sub>t  memtableP (fst (fib_fun 1 xs)) 0 2" 
     @end
-    @endgoal
+  @endgoal
+  @subgoal "(i = Suc (Suc n), M = M)"
+    @let "x = xs ! (Suc (Suc n))"
+    @case "x = None" @with 
+      @have "(Suc (Suc n)) < length xs"
+      @have "Suc (Suc n)\<le> length (fst (fib_fun (Suc n) xs))"
+      @have "consistent_list (fst (fib_fun (Suc (Suc n)) xs))"  
+      @have "fst (fib_fun (Suc (Suc n)) xs) = fst (fib_fun n (fst (fib_fun (Suc n) xs)))[Suc (Suc n) := Some (fib (Suc (Suc n)))]"
+    @end (* case *)
+    @have "xs ! (Suc (Suc n)) = Some (fib (Suc (Suc n)))"
+    @have "consistent_list (fst (fib_fun (Suc (Suc n)) xs))"
+    @have "(fst (fib_fun (Suc (Suc n)) xs)) = xs"
+  @endgoal   
  @end
 @qed
 
-
+ 
 
 
 subsection "Wrap it up with an initialization phase and show run time complexity"
@@ -380,18 +349,24 @@ fun fib_impl :: "nat \<Rightarrow> nat Heap" where
 
 lemma empty_consistent: "consistent_list (replicate (n+1) None) = True" by auto2
 
+lemma "i \<le> n \<Longrightarrow> replicate (n+1) x ! i = x" apply(rule nth_replicate) by auto
+
+lemma phi_empty_ub [rewrite]: "phi (replicate n None) {0..<n} = C * n"
+  unfolding phi_def by auto 
+
 
 definition fib_time :: "nat \<Rightarrow> nat" where [rewrite]: 
-  "fib_time n = 6*(n+1) + (n+2) + 2"
+  "fib_time n = (n+2) + 4 + C * (n+1)"
  
 (* the last two lemmas are the important result that is reported to the outside world *)
 
 lemma fib_impl_rule[hoare_triple]: "<$(fib_time n)> fib_impl n <\<lambda>r. \<up> (r = fib n)>\<^sub>t"
 @proof 
-  @have "fib_time n \<ge>\<^sub>t memtableP (replicate (n+1) None) 0 (n+1) + (n+2) + 2"
+  @have "fib_time n \<ge>\<^sub>t (n+2) + 4 + phi (replicate (n+1) None) {0..<n+1}"
+  @have "4 + phi (replicate (n+1) None) {0..<n+1} \<ge>\<^sub>t f_time n (replicate (n+1) None)"
 @qed
 
-lemma fib_bound[asym_bound]: "(\<lambda>n. fib_time n) \<in> \<Theta>(%n. n)" unfolding fib_time_def by auto2
+lemma fib_bound[asym_bound]: "(\<lambda>n. fib_time n) \<in> \<Theta>(%n. n)" unfolding C_def fib_time_def by auto2
 
  
 end
