@@ -2,6 +2,8 @@ theory DP
 imports "../Imperative_HOL_Time/SepLogicTime/SepAuto" "../Imperative_HOL_Time/SepLogicTime/Asymptotics_1D"
 begin
 
+no_notation Ref.update ("_ := _" 62)
+
 (* auxiliaries *)
 
 
@@ -58,21 +60,14 @@ setup {* add_fun_induct_rule (@{term fib_fun}, @{thm fib_fun.induct}) *}
 setup {* register_wellform_data ("fib_fun i xs", ["i < length xs"]) *}
 
 lemma fib_fun_stays[rewrite]: "n < length xs \<Longrightarrow> xs ! n \<noteq> None \<Longrightarrow> (fst (fib_fun n xs)) = xs"
-  apply(induct rule: fib_fun.induct) apply auto done
+  by(induction rule: fib_fun.induct) auto
 
 lemma fib_fun_length [rewrite]: "i < length xs \<Longrightarrow> length (fst (fib_fun i xs)) = length xs"
-@proof @fun_induct "fib_fun i xs"  @with
-  @subgoal "(i = 0, xs = xs)"
-    @case "xs ! 0 = None"
-  @endgoal
-  @subgoal "(i = Suc 0, xs = xs)"
-    @case "xs ! Suc 0 = None"
-  @endgoal
-  @subgoal "(i = Suc (Suc n), xs = xs)"
-    @unfold "fib_fun (Suc (Suc n)) xs"
-    @case "xs ! (Suc (Suc n)) \<noteq> None"
-  @endgoal @end
-@qed
+  by (induction i xs rule: fib_fun.induct) (auto split: option.split prod.split simp: Let_def)
+
+lemma consistent_list_update:
+  "consistent_list (xs[i:= Some v])" if "v = fib i" "consistent_list xs" "i < length xs"
+  using that by (auto simp add: consistent_list_def nth_list_update)
 
 (* the statemet of this lemma should be independent of the function (here fib) that is computed,
   also the structure of the proof should be the same, only potentially more recursive calls
@@ -82,42 +77,34 @@ lemma fib_fun_effect: "i < length xs \<Longrightarrow> consistent_list xs
       \<Longrightarrow> (fst (fib_fun i xs)) ! i = Some (fib i) \<and> snd (fib_fun i xs) = fib i \<and> consistent_list (fst (fib_fun i xs))"
 proof (induction i xs rule: fib_fun.induct)
   case (1 xs)
-  then show ?case apply(auto simp: consistent_list_def fib_fun_length split: option.split prod.split)
-    by (metis "1.prems"(1) One_nat_def fib.simps(1) nth_list_update option.inject)
+  then show ?case
+    by (auto simp: consistent_list_def fib_fun_length nth_list_update split: option.split)
 next
   case (2 xs)
-  then show ?case apply(auto simp: consistent_list_def fib_fun_length split: option.split prod.split)
-    by (metis One_nat_def fib.simps(2) nth_list_update option.inject)    
+  then show ?case
+    by (auto simp: consistent_list_def fib_fun_length nth_list_update split: option.split)
 next
   case (3 n xs)
-  show ?case 
+  show ?case
   proof (cases "xs ! Suc (Suc n) = None")
     case True  
+
     let ?xs' = "fst (fib_fun (Suc n) xs)"
     from True 3 have "?xs' ! Suc n = Some (fib (Suc n))"
         and a: "snd (fib_fun (Suc n) xs) = fib (Suc n)"
-        and c: "consistent_list ?xs'" by auto
+        and "consistent_list ?xs'" by auto
 
     let ?xs'' = "fst (fib_fun n ?xs')"
- 
-    from True c 3(2)[of None "fib_fun (Suc n) xs" "fst (fib_fun (Suc n) xs)"]
-    have "n < length (fst (fib_fun (Suc n) xs)) \<Longrightarrow> ?xs'' ! n = Some (fib n) \<and> snd (fib_fun n ?xs') = fib n \<and>
-      consistent_list ?xs''"
-      using prod.collapse by fastforce
-    with 3(3) have "?xs'' ! n = Some (fib n)" and b: "snd (fib_fun n ?xs') = fib n" and c'': "consistent_list ?xs''"
-      by (auto simp: fib_fun_length)      
+    from 3(2)[OF HOL.refl True HOL.refl prod.collapse] \<open>consistent_list ?xs'\<close> 3(3) have
+      "?xs'' ! n = Some (fib n)" and b: "snd (fib_fun n ?xs') = fib n" and "consistent_list ?xs''"
+      by (auto simp: fib_fun_length)
 
-    have c''': "consistent_list (?xs''[Suc (Suc n) := Some (fib (Suc (Suc n)))] )"
-      using c'' unfolding consistent_list_def apply auto
-        subgoal for i y apply(cases "i=Suc (Suc n)") by auto done
+    then have c: "consistent_list (?xs''[Suc (Suc n) := Some (fib (Suc (Suc n)))] )"
+      using 3(3) by (auto simp: fib_fun_length intro: consistent_list_update)
 
-    have t: "length ?xs'' = length xs" using 3(3) by (auto simp: fib_fun_length)
-    thm prod_def
-    from True show ?thesis apply(auto simp: split_beta split: option.split)
-      subgoal using t by (metis "3.prems"(1) a b fst_conv nth_list_update_eq) 
-      subgoal using t by (metis a b snd_conv) 
-      using c''' apply(auto simp add: a b) by (metis fst_conv) 
-    
+    from True show ?thesis
+      apply(auto simp: Let_def split_beta 3 split: option.split)
+      using c 3(3) by (auto simp: a b fib_fun_length)
   next
     case False
     with 3(3-4) show ?thesis unfolding consistent_list_def by auto
@@ -175,7 +162,7 @@ fun fibH :: "nat \<Rightarrow> nat option array \<Rightarrow> nat Heap" where
 
 setup {* add_fun_induct_rule (@{term fibH}, @{thm fibH.induct}) *}
 
-
+ 
 subsection "definition of time function"
 
 fun f_time :: "nat \<Rightarrow> (nat option) list \<Rightarrow> nat" where
@@ -202,7 +189,7 @@ subsubsection "the potential for the memoization Table"
 definition "C = 8"
 definition phi :: "(nat option) list \<Rightarrow> nat set \<Rightarrow> nat" where
   "phi xs S =  sum (\<lambda>i. case xs!i of None \<Rightarrow> C | Some _ \<Rightarrow> 0) S"
-
+ 
 lemma assumes "(\<forall>i\<in>S. i<length xs) " "x\<in>S" "xs!x = None" "finite S"
   shows phi_update_extract: "phi (xs[x:=Some v]) S + C = phi xs S"
 proof -
